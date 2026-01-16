@@ -1,0 +1,191 @@
+name: Code Review on Push
+
+on:
+  push:
+    branches:
+      - '**'
+    paths:
+      - '**.js'
+      - '**.html'
+      - '**.css'
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  code-review:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install ESLint and dependencies
+        run: |
+          npm init -y
+          npm install --save-dev eslint eslint-plugin-html
+      
+      - name: Create ESLint config
+        run: |
+          cat > .eslintrc.json << 'EOF'
+          {
+            "env": {
+              "browser": true,
+              "es2021": true
+            },
+            "extends": "eslint:recommended",
+            "parserOptions": {
+              "ecmaVersion": "latest",
+              "sourceType": "module"
+            },
+            "rules": {
+              "no-unused-vars": "warn",
+              "no-undef": "warn",
+              "semi": ["warn", "always"],
+              "quotes": ["warn", "single", { "avoidEscape": true }],
+              "no-console": "off"
+            }
+          }
+          EOF
+      
+      - name: Run ESLint
+        id: eslint
+        continue-on-error: true
+        run: |
+          npx eslint "**/*.js" --format json --output-file eslint-report.json || true
+          npx eslint "**/*.js" || true
+      
+      - name: Attempt auto-fix
+        id: autofix
+        continue-on-error: true
+        run: |
+          npx eslint "**/*.js" --fix || true
+          
+          # Check if there are changes
+          if git diff --quiet; then
+            echo "has_fixes=false" >> $GITHUB_OUTPUT
+            echo "No auto-fixable issues found"
+          else
+            echo "has_fixes=true" >> $GITHUB_OUTPUT
+            echo "Auto-fixable issues found and fixed"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add .
+            git commit -m "Auto-fix: Apply ESLint fixes"
+          fi
+      
+      - name: Push auto-fixes
+        if: steps.autofix.outputs.has_fixes == 'true'
+        run: |
+          if ! git push; then
+            echo "::error::Failed to push auto-fixes. Manual intervention required."
+            exit 1
+          fi
+      
+      - name: Check for remaining issues
+        id: check-issues
+        run: |
+          if [ -f eslint-report.json ]; then
+            ISSUE_COUNT=$(node -e "
+              try {
+                const report = require('./eslint-report.json');
+                if (!Array.isArray(report)) {
+                  console.log('0');
+                } else {
+                  console.log(report.reduce((sum, file) => sum + file.errorCount + file.warningCount, 0));
+                }
+              } catch (error) {
+                console.error('Error parsing ESLint report:', error.message);
+                console.log('0');
+              }
+            " 2>/dev/null || echo "0")
+            echo "issue_count=$ISSUE_COUNT" >> $GITHUB_OUTPUT
+            
+            if [ "$ISSUE_COUNT" != "0" ]; then
+              echo "Found $ISSUE_COUNT issues that need manual review"
+              exit 1
+            fi
+          fi
+      
+      - name: Create issue for complex problems
+        if: failure() && steps.check-issues.outputs.issue_count != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            
+            // Read ESLint report
+            let reportContent = '';
+            try {
+              const report = JSON.parse(fs.readFileSync('eslint-report.json', 'utf8'));
+              
+              reportContent = '## Code Review Findings\n\n';
+              reportContent += `Found issues in the following files:\n\n`;
+              
+              report.forEach(file => {
+                if (file.errorCount > 0 || file.warningCount > 0) {
+                  reportContent += `### ${file.filePath}\n\n`;
+                  reportContent += `- Errors: ${file.errorCount}\n`;
+                  reportContent += `- Warnings: ${file.warningCount}\n\n`;
+                  
+                  if (file.messages.length > 0) {
+                    reportContent += '**Issues:**\n\n';
+                    file.messages.forEach(msg => {
+                      const severity = msg.severity === 2 ? '❌' : '⚠️';
+                      reportContent += `${severity} Line ${msg.line}:${msg.column} - ${msg.message} (${msg.ruleId})\n`;
+                    });
+                    reportContent += '\n';
+                  }
+                }
+              });
+              
+            } catch (error) {
+              reportContent = 'Error reading ESLint report: ' + error.message;
+            }
+            
+            reportContent += '\n\n---\n';
+            reportContent += `**Commit:** ${context.sha}\n`;
+            reportContent += `**Branch:** ${context.ref}\n`;
+            reportContent += `**Triggered by:** ${context.actor}\n`;
+            
+            // Check if issue already exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'code-review,automated'
+            });
+            
+            const existingIssue = issues.data.find(issue => 
+              issue.title.includes('Code Review Issues') && 
+              issue.body.includes(context.sha)
+            );
+            
+            if (!existingIssue) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Code Review Issues - ${new Date().toISOString().split('T')[0]}`,
+                body: reportContent,
+                labels: ['code-review', 'automated', 'needs-attention']
+              });
+            } else {
+              console.log('Issue already exists for this commit');
+            }
+      
+      - name: Upload ESLint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eslint-report
+          path: eslint-report.json
+          retention-days: 30
