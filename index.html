@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Food Fight!</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1 class="title">FOOD FIGHT!</h1>
+        <p class="subtitle">Pick the better food!</p>
+
+        <div class="arena">
+            <div class="food-card left" id="food-left" onclick="selectFood('left')">
+                <div class="food-image-container">
+                    <img id="img-left" src="" alt="Food 1">
+                </div>
+                <h2 id="name-left"></h2>
+            </div>
+
+            <div class="vs">VS</div>
+
+            <div class="food-card right" id="food-right" onclick="selectFood('right')">
+                <div class="food-image-container">
+                    <img id="img-right" src="" alt="Food 2">
+                </div>
+                <h2 id="name-right"></h2>
+            </div>
+        </div>
+
+        <div class="scoreboard">
+            <h3>Champions</h3>
+            <div id="champions"></div>
+        </div>
+    </div>
+
+    <!-- Knockout overlay -->
+    <div class="knockout-overlay" id="knockout-overlay">
+        <div class="knockout-text" id="knockout-text">KNOCKOUT!</div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
