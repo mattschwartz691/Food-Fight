@@ -86,23 +86,38 @@ jobs:
       - name: Push auto-fixes
         if: steps.autofix.outputs.has_fixes == 'true'
         run: |
-          git push || echo "Unable to push fixes - may need manual intervention"
+          if ! git push; then
+            echo "::error::Failed to push auto-fixes. Manual intervention required."
+            exit 1
+          fi
       
       - name: Check for remaining issues
         id: check-issues
         run: |
           if [ -f eslint-report.json ]; then
-            ISSUE_COUNT=$(node -e "const report = require('./eslint-report.json'); console.log(report.reduce((sum, file) => sum + file.errorCount + file.warningCount, 0));")
+            ISSUE_COUNT=$(node -e "
+              try {
+                const report = require('./eslint-report.json');
+                if (!Array.isArray(report)) {
+                  console.log('0');
+                } else {
+                  console.log(report.reduce((sum, file) => sum + file.errorCount + file.warningCount, 0));
+                }
+              } catch (error) {
+                console.error('Error parsing ESLint report:', error.message);
+                console.log('0');
+              }
+            " 2>/dev/null || echo "0")
             echo "issue_count=$ISSUE_COUNT" >> $GITHUB_OUTPUT
             
-            if [ "$ISSUE_COUNT" -gt 0 ]; then
+            if [ "$ISSUE_COUNT" != "0" ]; then
               echo "Found $ISSUE_COUNT issues that need manual review"
               exit 1
             fi
           fi
       
       - name: Create issue for complex problems
-        if: failure() && steps.check-issues.outputs.issue_count > 0
+        if: failure() && steps.check-issues.outputs.issue_count != '0'
         uses: actions/github-script@v7
         with:
           script: |
