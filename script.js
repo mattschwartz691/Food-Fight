@@ -40,6 +40,23 @@ const knockoutOverlay = document.getElementById('knockout-overlay');
 const knockoutText = document.getElementById('knockout-text');
 const championsDiv = document.getElementById('champions');
 
+// Make cards keyboard-accessible and attach handlers
+function makeCardAccessible(card) {
+    if (!card) return;
+    card.setAttribute('tabindex', '0');
+    card.setAttribute('role', 'button');
+    card.addEventListener('click', () => selectFood(card.dataset.side));
+    card.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            selectFood(card.dataset.side);
+        }
+    });
+}
+
+makeCardAccessible(foodLeft);
+makeCardAccessible(foodRight);
+
 // Get random food that hasn't been used recently
 function getRandomFood(exclude = []) {
     const available = foods.filter(f =>
@@ -79,7 +96,9 @@ function updateFoodDisplay(side, food) {
     const card = side === 'left' ? foodLeft : foodRight;
 
     img.src = food.image;
+    img.alt = food.name;
     name.textContent = food.name;
+    card.setAttribute('aria-label', `${food.name} — select to fight`);
 
     // Add entering animation
     card.classList.add('entering');
